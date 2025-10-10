@@ -1,0 +1,21 @@
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-aws>=0.2.0
+
+# AWS SDK
+bedrock-agentcore
+boto3>=1.35.0
+botocore>=1.35.0
+
+# AgentCore SDK (REQUIRED)
+bedrock-agentcore-starter-toolkit
+
+# Data processing (2.2.x supports up to Python 3.12)
+pandas>=2.2.0
+
+# Typing extensions
+typing-extensions>=4.12.0
+
+# For local testing
+python-dotenv==1.0.1

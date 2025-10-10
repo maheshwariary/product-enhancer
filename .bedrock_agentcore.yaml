@@ -1,0 +1,40 @@
+default_agent: agent
+agents:
+  agent:
+    name: agent
+    entrypoint: agent.py
+    platform: linux/arm64
+    container_runtime: docker
+    source_path: null
+    aws:
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-d4f0bc5a29
+      execution_role_auto_create: false
+      account: '389057546498'
+      region: us-west-2
+      ecr_repository: 389057546498.dkr.ecr.us-west-2.amazonaws.com/bedrock-agentcore-agent
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: agent-03bwI69Ne6
+      agent_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:runtime/agent-03bwI69Ne6
+      agent_session_id: c60c04af-3b59-488e-a9a9-4bc2943b2336
+    codebuild:
+      project_name: null
+      execution_role: null
+      source_bucket: null
+    memory:
+      mode: STM_ONLY
+      memory_id: agent_mem-m09QjkE9EW
+      memory_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:memory/agent_mem-m09QjkE9EW
+      memory_name: agent_mem
+      event_expiry_days: 30
+      first_invoke_memory_check_done: false
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
