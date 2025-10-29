@@ -1,122 +1,264 @@
-import argparse
-import json
-import pathlib
+"""
+Product Matching MCP Server
+Supports both interactive queries AND batch CSV processing
+"""
 import sys
-import uuid
-from typing import Any, Dict
-
+import json
 import boto3
+import pandas as pd
+from io import StringIO
+from datetime import datetime
+from pathlib import Path
 
+AGENT_ARN = "arn:aws:bedrock-agentcore:us-west-2:389057546498:runtime/agent-03bwI69Ne6"
 
-def build_payload(input_csv_text: str, max_concurrent_rows: int, wrap_under_input: bool) -> str:
-    """Build the AgentCore payload string.
+def log(msg):
+    print(f"[PRODUCT-MATCHING-MCP] {datetime.now()}: {msg}", file=sys.stderr)
 
-    If wrap_under_input=True, sends {"input": {...}}. Otherwise sends top-level keys.
-    """
-    if wrap_under_input:
-        body: Dict[str, Any] = {
-            "input": {
-                "input_csv": input_csv_text,
-                "max_concurrent_rows": max_concurrent_rows,
+def enrich_vendor(vendor_name, vendor_url, product_name="", product_url=""):
+    """Enrich a single vendor/product"""
+    log(f"Enriching: {vendor_name}")
+    
+    client = boto3.client('bedrock-agentcore', region_name='us-west-2')
+    csv_input = f"vendor_name,vendor_url,product_name,product_url\n{vendor_name},{vendor_url},{product_name or vendor_name},{product_url or vendor_url}"
+    
+    response = client.invoke_agent_runtime(
+        agentRuntimeArn=AGENT_ARN,
+        runtimeSessionId=f'mcp-{int(__import__("time").time())}000000000000000',
+        payload=json.dumps({"input_csv": csv_input})
+    )
+    
+    result = json.loads(response['response'].read())
+    
+    if result.get('status') == 'success':
+        df = pd.read_csv(StringIO(result['output_csv']))
+        row = df.to_dict('records')[0]
+        
+        return {
+            "vendor": {
+                "legal_name": row.get('legal_vendor_name'),
+                "website": row.get('official_vendor_website'),
+                "wikipedia": row.get('wikipedia_link'),
+                "linkedin": row.get('linkedin_profile'),
+                "founded": row.get('founded_year')
+            },
+            "product": {
+                "type": row.get('product_type'),
+                "users": row.get('product_users'),
+                "features": row.get('product_features')
+            },
+            "taxonomy": {
+                "match_1": row.get('taxonomy_match_1'),
+                "match_2": row.get('taxonomy_match_2')
             }
         }
     else:
-        body = {
-            "input_csv": input_csv_text,
-            "max_concurrent_rows": max_concurrent_rows,
-        }
-    return json.dumps(body)
+        return {"error": result.get('error')}
 
-
-def parse_response(raw_bytes: bytes) -> Dict[str, Any]:
-    """Parse the AgentCore response stream and extract the output object."""
-    try:
-        payload_json = json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
-        # Fallback: return opaque payload
-        return {"raw": raw_bytes.decode("utf-8", errors="replace")}
-
-    # Some runtimes wrap return as {"output": {...}}. Support both.
-    if isinstance(payload_json, dict) and "output" in payload_json:
-        output = payload_json["output"]
-        if isinstance(output, str):
-            try:
-                return json.loads(output)
-            except Exception:
-                return {"output": output}
-        return output
-
-    return payload_json
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Invoke an AWS AgentCore runtime with a CSV input and save the output CSV.")
-    parser.add_argument("--agent-arn", "-a", required=True, help="AgentCore runtime ARN (agentRuntimeArn)")
-    parser.add_argument("--region", "-r", default="us-west-2", help="AWS region (default: us-west-2)")
-    parser.add_argument("--qualifier", "-q", default="DEFAULT", help="Agent qualifier (default: DEFAULT)")
-    parser.add_argument("--input", "-i", default=str(pathlib.Path(__file__).with_name("input.csv")), help="Path to input CSV (default: deploy/input.csv)")
-    parser.add_argument("--output", "-o", default=str(pathlib.Path.cwd() / "output.csv"), help="Path to save output CSV (default: ./output.csv)")
-    parser.add_argument("--max-concurrent-rows", "-m", type=int, default=20, help="Max concurrent rows (default: 20)")
-    parser.add_argument("--wrap-input", action="store_true", help="Wrap payload under 'input' (use after redeploying updated handler)")
-
-    args = parser.parse_args()
-
-    input_path = pathlib.Path(args.input)
+def enrich_csv_file(input_file_path, output_file_path, max_concurrent=20):
+    """Batch process a CSV file"""
+    log(f"Batch processing: {input_file_path}")
+    
+    # Validate input file
+    input_path = Path(input_file_path)
     if not input_path.exists():
-        print(f"ERROR: Input CSV not found: {input_path}", file=sys.stderr)
-        return 2
-
-    input_csv_text = input_path.read_text(encoding="utf-8")
-
-    client = boto3.client("bedrock-agentcore", region_name=args.region)
-
-    # Must be 33+ chars; use a long UUID-based session id
-    runtime_session_id = f"session-{uuid.uuid4().hex}-{uuid.uuid4().hex}"
-
-    payload = build_payload(
-        input_csv_text=input_csv_text,
-        max_concurrent_rows=args.max_concurrent_rows,
-        wrap_under_input=args.wrap_input,
-    )
-
+        return {"error": f"Input file not found: {input_file_path}"}
+    
+    # Read input CSV
+    try:
+        input_csv_text = input_path.read_text(encoding='utf-8')
+    except Exception as e:
+        return {"error": f"Failed to read input file: {e}"}
+    
+    # Count rows
+    row_count = len(input_csv_text.strip().split('\n')) - 1
+    log(f"Processing {row_count} rows with concurrency {max_concurrent}")
+    
+    # Estimate time
+    estimated_minutes = (row_count / max_concurrent) * 0.5
+    
+    # Create boto3 client
+    client = boto3.client('bedrock-agentcore', region_name='us-west-2')
+    
+    # Generate session ID
+    import uuid
+    session_id = f'batch-{uuid.uuid4().hex}-{uuid.uuid4().hex}'
+    
+    # Call agent
     try:
         response = client.invoke_agent_runtime(
-            agentRuntimeArn=args.agent_arn,
-            runtimeSessionId=runtime_session_id,
-            payload=payload,
-            qualifier=args.qualifier,
+            agentRuntimeArn=AGENT_ARN,
+            runtimeSessionId=session_id,
+            payload=json.dumps({
+                "input_csv": input_csv_text,
+                "max_concurrent_rows": max_concurrent
+            })
         )
     except Exception as e:
-        print(f"ERROR: Invoke failed: {e}", file=sys.stderr)
-        return 3
-
+        return {"error": f"Agent invocation failed: {e}"}
+    
+    # Parse response
     try:
-        raw = response["response"].read()
+        result = json.loads(response['response'].read())
     except Exception as e:
-        print(f"ERROR: Failed reading response stream: {e}", file=sys.stderr)
-        return 4
+        return {"error": f"Failed to parse response: {e}"}
+    
+    if result.get('status') != 'success':
+        return {"error": result.get('error', 'Unknown error')}
+    
+    # Save output
+    output_path = Path(output_file_path)
+    try:
+        output_path.write_text(result['output_csv'], encoding='utf-8')
+    except Exception as e:
+        return {"error": f"Failed to save output: {e}"}
+    
+    return {
+        "success": True,
+        "rows_processed": result.get('rows_processed', row_count),
+        "output_file": str(output_path.absolute()),
+        "estimated_time_minutes": round(estimated_minutes, 1),
+        "message": f"Successfully processed {result.get('rows_processed')} rows. Output saved to {output_path.absolute()}"
+    }
 
-    result_obj = parse_response(raw)
+def handle_mcp(request):
+    """Handle MCP protocol requests"""
+    method = request.get("method")
+    req_id = request.get("id", 0)
+    
+    if method == "initialize":
+        log("Initialize request")
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "product-matching-mcp", "version": "1.0.0"}
+            }
+        }
+    
+    elif method == "tools/list":
+        log("List tools request")
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "enrich_vendor",
+                        "description": "Enrich a single vendor/product with detailed information. Use for 1-5 vendors.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "vendor_name": {"type": "string", "description": "Vendor company name"},
+                                "vendor_url": {"type": "string", "description": "Vendor website URL"},
+                                "product_name": {"type": "string", "description": "Product name (optional)"},
+                                "product_url": {"type": "string", "description": "Product URL (optional)"}
+                            },
+                            "required": ["vendor_name", "vendor_url"]
+                        }
+                    },
+                    {
+                        "name": "enrich_csv_file",
+                        "description": "Batch process a CSV file with 100s or 1000s of vendors. Provide full file paths. WARNING: This can take 60+ minutes for large files.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "input_file_path": {
+                                    "type": "string",
+                                    "description": "Full path to input CSV file (e.g., C:\\data\\vendors.csv)"
+                                },
+                                "output_file_path": {
+                                    "type": "string",
+                                    "description": "Full path where enriched CSV will be saved (e.g., C:\\data\\enriched.csv)"
+                                },
+                                "max_concurrent": {
+                                    "type": "integer",
+                                    "description": "Max concurrent rows to process (default: 20, max: 50)",
+                                    "default": 20
+                                }
+                            },
+                            "required": ["input_file_path", "output_file_path"]
+                        }
+                    }
+                ]
+            }
+        }
+    
+    elif method == "tools/call":
+        tool_name = request["params"]["name"]
+        args = request["params"]["arguments"]
+        
+        log(f"Tool call: {tool_name}")
+        
+        if tool_name == "enrich_vendor":
+            try:
+                result = enrich_vendor(
+                    args["vendor_name"],
+                    args["vendor_url"],
+                    args.get("product_name", ""),
+                    args.get("product_url", "")
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
+                    }
+                }
+            except Exception as e:
+                log(f"Error: {e}")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32603, "message": str(e)}
+                }
+        
+        elif tool_name == "enrich_csv_file":
+            try:
+                result = enrich_csv_file(
+                    args["input_file_path"],
+                    args["output_file_path"],
+                    args.get("max_concurrent", 20)
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(result, indent=2)}]
+                    }
+                }
+            except Exception as e:
+                log(f"Error: {e}")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32603, "message": str(e)}
+                }
+    
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": f"Unknown method: {method}"}
+    }
 
-    # Expecting our app to return { 'output_csv': '...', 'rows_processed': N, 'status': 'success' }
-    output_csv = None
-    if isinstance(result_obj, dict):
-        output_csv = result_obj.get("output_csv")
-
-    if not output_csv:
-        # Write the full JSON response for troubleshooting
-        fallback_path = pathlib.Path(args.output).with_suffix(".json")
-        fallback_path.write_text(json.dumps(result_obj, indent=2), encoding="utf-8")
-        print(f"WARNING: No 'output_csv' found. Wrote full response JSON to: {fallback_path}")
-        return 0
-
-    out_path = pathlib.Path(args.output)
-    out_path.write_text(output_csv, encoding="utf-8")
-    print(f"Saved output CSV to: {out_path}")
-    return 0
-
+def main():
+    log("Starting Product Matching MCP Server")
+    log(f"Using agent: {AGENT_ARN}")
+    
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            response = handle_mcp(request)
+            print(json.dumps(response), flush=True)
+        except Exception as e:
+            log(f"Error: {e}")
+            print(json.dumps({
+                "jsonrpc": "2.0",
+                "id": 0,
+                "error": {"code": -32603, "message": str(e)}
+            }), flush=True)
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-
-
+    main()

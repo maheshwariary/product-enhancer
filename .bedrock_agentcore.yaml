@@ -4,7 +4,7 @@ agents:
     name: agent
     entrypoint: agent.py
     platform: linux/arm64
-    container_runtime: docker
+    container_runtime: none
     source_path: null
     aws:
       execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-d4f0bc5a29
@@ -23,16 +23,92 @@ agents:
     bedrock_agentcore:
       agent_id: agent-03bwI69Ne6
       agent_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:runtime/agent-03bwI69Ne6
-      agent_session_id: c60c04af-3b59-488e-a9a9-4bc2943b2336
+      agent_session_id: null
     codebuild:
-      project_name: null
-      execution_role: null
-      source_bucket: null
+      project_name: bedrock-agentcore-agent-builder
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKCodeBuild-us-west-2-d4f0bc5a29
+      source_bucket: bedrock-agentcore-codebuild-sources-389057546498-us-west-2
     memory:
       mode: STM_ONLY
       memory_id: agent_mem-m09QjkE9EW
       memory_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:memory/agent_mem-m09QjkE9EW
       memory_name: agent_mem
+      event_expiry_days: 30
+      first_invoke_memory_check_done: false
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
+  agent_mcp:
+    name: agent_mcp
+    entrypoint: agent_mcp.py
+    platform: linux/arm64
+    container_runtime: none
+    source_path: null
+    aws:
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-87b1284110
+      execution_role_auto_create: false
+      account: '389057546498'
+      region: us-west-2
+      ecr_repository: 389057546498.dkr.ecr.us-west-2.amazonaws.com/bedrock-agentcore-agent_mcp
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: MCP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: agent_mcp-9pHCw0EyCq
+      agent_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:runtime/agent_mcp-9pHCw0EyCq
+      agent_session_id: null
+    codebuild:
+      project_name: bedrock-agentcore-agent_mcp-builder
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKCodeBuild-us-west-2-87b1284110
+      source_bucket: bedrock-agentcore-codebuild-sources-389057546498-us-west-2
+    memory:
+      mode: STM_ONLY
+      memory_id: agent_mcp_mem-y9Cs6RBtNG
+      memory_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:memory/agent_mcp_mem-y9Cs6RBtNG
+      memory_name: agent_mcp_mem
+      event_expiry_days: 30
+      first_invoke_memory_check_done: false
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
+  handler:
+    name: handler
+    entrypoint: handler.py
+    platform: linux/arm64
+    container_runtime: none
+    source_path: null
+    aws:
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKRuntime-us-west-2-3128389bb1
+      execution_role_auto_create: false
+      account: '389057546498'
+      region: us-west-2
+      ecr_repository: 389057546498.dkr.ecr.us-west-2.amazonaws.com/bedrock-agentcore-handler
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: handler-jsJed82ije
+      agent_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:runtime/handler-jsJed82ije
+      agent_session_id: null
+    codebuild:
+      project_name: bedrock-agentcore-handler-builder
+      execution_role: arn:aws:iam::389057546498:role/AmazonBedrockAgentCoreSDKCodeBuild-us-west-2-3128389bb1
+      source_bucket: bedrock-agentcore-codebuild-sources-389057546498-us-west-2
+    memory:
+      mode: STM_ONLY
+      memory_id: handler_mem-YUGmjs8JuJ
+      memory_arn: arn:aws:bedrock-agentcore:us-west-2:389057546498:memory/handler_mem-YUGmjs8JuJ
+      memory_name: handler_mem
       event_expiry_days: 30
       first_invoke_memory_check_done: false
     authorizer_configuration: null

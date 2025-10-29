@@ -10,7 +10,12 @@ from .state import VendorProductState
 from .bedrock_client import get_llm_manager, extract_json_from_response
 from .cache_manager import get_cache_manager
 from config.prompts import PROMPTS
-from config.reference import get_product_attributes_list, get_product_context
+from config.reference import (
+    get_product_attributes_list,
+    get_product_context,
+    get_taxonomy_list,
+    get_taxonomy_with_definitions
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +176,6 @@ def extract_software_type_node(state: VendorProductState) -> Dict[str, Any]:
     
     return {"software_type": software_type if software_type else "N/A"}
 
-
 # =============================================================================
 # NODE 4: Taxonomy Matching
 # =============================================================================
@@ -179,23 +183,20 @@ def extract_software_type_node(state: VendorProductState) -> Dict[str, Any]:
 async def find_taxonomy_matches_node(state: VendorProductState) -> Dict[str, Any]:
     """
     Match product to taxonomy using reference data
-    
-    Uses products.csv to find top 2 matches
-    Cache TTL: 1 day
     """
     software_type = state.get("software_type", "N/A")
     product_name = state["product_name"]
     
-    # Get reference data context
-    product_context = get_product_context(product_name)
-    available_attributes = get_product_attributes_list()
+    from config.reference import get_taxonomy_list
     
-    if not available_attributes:
-        logger.warning("No reference data available for taxonomy matching")
+    taxonomy_list = get_taxonomy_list()
+    
+    if not taxonomy_list:
+        logger.warning("No taxonomy data available")
         return {
             "taxonomy_matches": [
-                {"Taxonomy Name": "N/A - Reference data not loaded"},
-                {"Taxonomy Name": "N/A - Reference data not loaded"}
+                {"Taxonomy Name": "N/A"},
+                {"Taxonomy Name": "N/A"}
             ]
         }
     
@@ -212,34 +213,40 @@ async def find_taxonomy_matches_node(state: VendorProductState) -> Dict[str, Any
     
     llm = get_llm_manager()
     
-    # Build prompt with reference data
-    attributes_list = "\n".join([f"- {attr}" for attr in available_attributes[:50]])
+    # Build numbered list of ALL taxonomies
+    taxonomy_text = "\n".join([f"{i}. {tax}" for i, tax in enumerate(taxonomy_list, 1)])
     
-    system_prompt = f"""You are matching products to taxonomy categories.
+    system_prompt = """You are a taxonomy classification expert. You match products to the most relevant taxonomy categories from a provided list.
 
-Available Product Attributes/Categories from our database:
-{attributes_list}
-
-{f"Reference Product Info:\\n{product_context}" if product_context else ""}
-
-Find the 2 most relevant categories for this product."""
+CRITICAL RULES:
+1. You MUST return the EXACT taxonomy text from the numbered list - copy it character-for-character
+2. Do NOT paraphrase, shorten, or modify the taxonomy names
+3. Do NOT make up new taxonomy names
+4. If unsure, pick the closest match from the list"""
     
-    prompt = f"""Product: {product_name}
-Type: {software_type}
+    prompt = f"""Product Name: {product_name}
+Product Type: {software_type}
 
-Based on the available categories above, identify the top 2 most relevant taxonomy matches.
+Available Taxonomy Categories (choose from this list):
+{taxonomy_text}
 
-Return ONLY JSON:
+Task: Select the 2 most relevant taxonomy categories for this product.
+
+Examples of correct format:
+- For a CRM product: "Software > Enterprise Applications > Customer Relationship Management Applications"  
+- For security software: "Software > Software Infrastructure > Security > Identity and Access Management"
+
+Return ONLY this JSON (copy taxonomy names EXACTLY from the numbered list above):
 {{
-    "Top_Match_1": {{"Taxonomy Name": "exact category from list"}},
-    "Top_Match_2": {{"Taxonomy Name": "exact category from list"}}
+    "match_1": "EXACT taxonomy from list",
+    "match_2": "EXACT taxonomy from list"
 }}"""
     
     try:
         response = await llm.call_async(
             prompt,
             system_prompt=system_prompt,
-            model="haiku"  # Use faster model for matching
+            model="sonnet"  # Use smarter model for better accuracy
         )
         
         if not response:
@@ -250,12 +257,37 @@ Return ONLY JSON:
         json_str = extract_json_from_response(response)
         matches = json.loads(json_str)
         
+        # Extract matches (handle both formats)
+        match1 = matches.get("match_1") or matches.get("Top_Match_1", {}).get("Taxonomy Name", "N/A")
+        match2 = matches.get("match_2") or matches.get("Top_Match_2", {}).get("Taxonomy Name", "N/A")
+        
+        # Validate exact match
+        if match1 not in taxonomy_list:
+            logger.warning(f"Invalid taxonomy returned: '{match1}'")
+            # Try fuzzy match
+            for tax in taxonomy_list:
+                if match1.lower() in tax.lower() or tax.lower() in match1.lower():
+                    logger.info(f"Fuzzy matched '{match1}' to '{tax}'")
+                    match1 = tax
+                    break
+            else:
+                match1 = "N/A"
+        
+        if match2 not in taxonomy_list:
+            logger.warning(f"Invalid taxonomy returned: '{match2}'")
+            for tax in taxonomy_list:
+                if match2.lower() in tax.lower() or tax.lower() in match2.lower():
+                    logger.info(f"Fuzzy matched '{match2}' to '{tax}'")
+                    match2 = tax
+                    break
+            else:
+                match2 = "N/A"
+        
         result = [
-            matches.get("Top_Match_1", {}),
-            matches.get("Top_Match_2", {})
+            {"Taxonomy Name": match1},
+            {"Taxonomy Name": match2}
         ]
         
-        # Cache result (1 day TTL)
         cache.set(
             result,
             ttl_seconds=24 * 3600,
@@ -281,11 +313,14 @@ async def find_attribute_matches_node(state: VendorProductState) -> Dict[str, An
     """
     Find attribute matches using reference data
     
-    Returns top 3 attribute matches
+    Returns top 3 attribute matches from products.csv
     Cache TTL: 1 day
     """
     software_type = state.get("software_type", "N/A")
     product_name = state["product_name"]
+    
+    # Get attributes list from reference data
+    from config.reference import get_product_attributes_list
     
     available_attributes = get_product_attributes_list()
     
@@ -310,25 +345,33 @@ async def find_attribute_matches_node(state: VendorProductState) -> Dict[str, An
     
     llm = get_llm_manager()
     
-    attributes_list = "\n".join([f"- {attr}" for attr in available_attributes[:100]])
+    # Build attribute list (use top 200 most common)
+    attributes_sample = available_attributes[:200]
+    attributes_text = "\n".join([f"{i}. {attr}" for i, attr in enumerate(attributes_sample, 1)])
+    
+    system_prompt = f"""You are matching products to attributes.
+
+Available Product Attributes:
+{attributes_text}
+
+CRITICAL: You MUST return ONLY the EXACT attribute names from the list above. Do not paraphrase or modify them."""
     
     prompt = f"""Product: {product_name}
 Type: {software_type}
 
-From these available attributes:
-{attributes_list}
+Based on the available attributes above, identify the top 3 most relevant attributes for this product.
 
-Select the 3 most relevant attributes for this product.
-
-Return ONLY JSON:
+Return ONLY JSON in this exact format (use the EXACT attribute names from the list):
 {{
-    "Top_Attribute_1": {{"Attribute Name": "..."}},
-    "Top_Attribute_2": {{"Attribute Name": "..."}},
-    "Top_Attribute_3": {{"Attribute Name": "..."}}
-}}"""
+    "Top_Attribute_1": {{"Attribute Name": "exact attribute from list"}},
+    "Top_Attribute_2": {{"Attribute Name": "exact attribute from list"}},
+    "Top_Attribute_3": {{"Attribute Name": "exact attribute from list"}}
+}}
+
+IMPORTANT: Copy the attribute names EXACTLY as they appear in the list. Do not modify or paraphrase."""
     
     try:
-        response = await llm.call_async(prompt, model="haiku")
+        response = await llm.call_async(prompt, system_prompt=system_prompt, model="haiku")
         
         if not response:
             return {
@@ -342,10 +385,26 @@ Return ONLY JSON:
         json_str = extract_json_from_response(response)
         matches = json.loads(json_str)
         
+        # Extract matches
+        attr1 = matches.get("Top_Attribute_1", {}).get("Attribute Name", "N/A")
+        attr2 = matches.get("Top_Attribute_2", {}).get("Attribute Name", "N/A")
+        attr3 = matches.get("Top_Attribute_3", {}).get("Attribute Name", "N/A")
+        
+        # Verify matches are in our attributes list (exact match validation)
+        if attr1 not in available_attributes:
+            logger.warning(f"LLM returned invalid attribute: {attr1}")
+            attr1 = "N/A"
+        if attr2 not in available_attributes:
+            logger.warning(f"LLM returned invalid attribute: {attr2}")
+            attr2 = "N/A"
+        if attr3 not in available_attributes:
+            logger.warning(f"LLM returned invalid attribute: {attr3}")
+            attr3 = "N/A"
+        
         result = [
-            matches.get("Top_Attribute_1", {}),
-            matches.get("Top_Attribute_2", {}),
-            matches.get("Top_Attribute_3", {})
+            {"Attribute Name": attr1},
+            {"Attribute Name": attr2},
+            {"Attribute Name": attr3}
         ]
         
         cache.set(
@@ -367,7 +426,6 @@ Return ONLY JSON:
                 {"Attribute Name": "N/A"}
             ]
         }
-
 
 # =============================================================================
 # NODE 6: Platform Taxonomy (Simplified)

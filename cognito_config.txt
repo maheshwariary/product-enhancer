@@ -1,0 +1,19 @@
+Clio AI MCP - Cognito Configuration
+===================================
+
+Discovery URL:
+https://cognito-idp.us-west-2.amazonaws.com/us-west-2_GKFBJOFUW/.well-known/openid-configuration
+
+Client ID:
+59fg413o0helvbfd6feh8pqhci
+
+Bearer Token (expires in 1 hour):
+eyJraWQiOiJkRk9jNEtqNE1yeTU2TmdTSG95WG1BVCtWd1NKR1lNdG85dXNYMEEzVXVFPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJmODUxZjNlMC0wMGYxLTcwYmEtNjYxZi0zNDY4ZDllZDNhNzgiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAudXMtd2VzdC0yLmFtYXpvbmF3cy5jb21cL3VzLXdlc3QtMl9HS0ZCSk9GVVciLCJjbGllbnRfaWQiOiI1OWZnNDEzbzBoZWx2YmZkNmZlaDhwcWhjaSIsIm9yaWdpbl9qdGkiOiI5YmI1MGE0Ny0zNjAxLTRmYTgtYTM4YS1hNjljMjFmOTRiNTYiLCJldmVudF9pZCI6ImJkMmM0ZTQ0LWE3YzctNDJkYS1hYTFhLWFmMjU4MmFjOTgwMSIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNjb3BlIjoiYXdzLmNvZ25pdG8uc2lnbmluLnVzZXIuYWRtaW4iLCJhdXRoX3RpbWUiOjE3NjA0MTMyOTMsImV4cCI6MTc2MDQxNjg5MywiaWF0IjoxNzYwNDEzMjkzLCJqdGkiOiIzYzc2N2Q3Mi1jYzJhLTRiMmItOWYzNC1mMjQyYTNhZDJiODUiLCJ1c2VybmFtZSI6ImNsaW8tdXNlciJ9.K69GYSWipOn7bAb9AzwHyFhoMyOBJMBo_3HLyhCn1HGj3XjAi5PxrmEXB9Lq7c8gHw7Oo4aEgpWk59-mGegjrTKGXeGPQriZxLMH1uaz6YHi-ADURh-IbK7wUL903XIcG4NDNVBvKFzaXm1CNP1zdusPWOcD5jun2Zh8AWkvEoKpubXh7OwDTbx-_DqT8fL2rr0YMayJ_4cC4RlolirQshXvXgybz7HiY1L9d9hzrIM9dSItx-X5Akfy4i_j70aAxvW7lNGHi8HuC2dvzIF-5L73iWse3Cjk1MFP0XyUbkP6dQUm3Ty9D46HENuyIxM-UBLHsxLXOBnBqfKBzLQ-Cw
+
+Username: clio-user
+Password: ClioAI2025!
+
+To get a new token when expired:
+aws cognito-idp initiate-auth   --client-id "59fg413o0helvbfd6feh8pqhci"   --auth-flow USER_PASSWORD_AUTH   --auth-parameters USERNAME='clio-user',PASSWORD='ClioAI2025!'   --region us-west-2   --query 'AuthenticationResult.AccessToken'   --output text
+
+Generated: Fri Oct 10 13:25:16 CDT 2025
